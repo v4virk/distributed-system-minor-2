@@ -1,0 +1,89 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.ensemble import BaggingClassifier, RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+
+def load_data(filepath):
+    df = pd.read_csv(filepath)
+    if df.empty:
+        raise ValueError("Loaded dataset is empty. Please check the file path and contents.")
+    return df
+
+def preprocess_data(df):
+    if 'Trip_Price' not in df.columns:
+        raise KeyError("Column 'Trip_Price' not found in dataset.")
+    df = df.dropna()
+    df['Trip_Price'] = pd.qcut(df['Trip_Price'], q=2, labels=[0, 1])
+    X = df.drop(columns=['Trip_Price'])
+    y = df['Trip_Price']
+    categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
+    numerical_cols = X.select_dtypes(include=['float64', 'int64']).columns.tolist()
+    preprocessor = ColumnTransformer([
+        ('num', StandardScaler(), numerical_cols),
+        ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_cols)
+    ])
+    return X, y, preprocessor, numerical_cols, categorical_cols
+
+def train_models(X, y, preprocessor, numerical_cols, categorical_cols):
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    bagging_model = Pipeline([
+        ('preprocessor', preprocessor),
+        ('bagging', BaggingClassifier(estimator=DecisionTreeClassifier(max_depth=5), n_estimators=50, random_state=42))
+    ])
+    rf_model = Pipeline([
+        ('preprocessor', preprocessor),
+        ('random_forest', RandomForestClassifier(n_estimators=50, max_depth=5, random_state=42))
+    ])
+    bagging_model.fit(X_train, y_train)
+    rf_model.fit(X_train, y_train)
+    evaluate_bagging_model(bagging_model, X_test, y_test)
+    evaluate_rf_model(rf_model, X_test, y_test, numerical_cols, categorical_cols)
+
+def evaluate_bagging_model(model, X_test, y_test):
+    y_pred = model.predict(X_test)
+    cm = confusion_matrix(y_test, y_pred)
+    print("\nBagging Classifier Classification Report:")
+    print(classification_report(y_test, y_pred))
+    plt.figure(figsize=(6, 4))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=["Low", "High"], yticklabels=["Low", "High"])
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.title('Confusion Matrix - Bagging Classifier')
+    plt.show()
+
+def evaluate_rf_model(model, X_test, y_test, numerical_cols, categorical_cols):
+    y_pred = model.predict(X_test)
+    cm = confusion_matrix(y_test, y_pred)
+    print("\nRandom Forest Classifier Classification Report:")
+    print(classification_report(y_test, y_pred))
+    plt.figure(figsize=(6, 4))
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Greens', xticklabels=["Low", "High"], yticklabels=["Low", "High"])
+    plt.xlabel('Predicted')
+    plt.ylabel('Actual')
+    plt.title('Confusion Matrix - Random Forest')
+    plt.show()
+    preprocessor = model.named_steps['preprocessor']
+    ohe = preprocessor.named_transformers_['cat']
+    if len(categorical_cols) > 0:
+        categorical_features = ohe.get_feature_names_out(input_features=categorical_cols)
+        all_features = np.concatenate([numerical_cols, categorical_features])
+    else:
+        all_features = numerical_cols
+    plt.figure(figsize=(20, 10))
+    best_tree = model.named_steps['random_forest'].estimators_[0]
+    plot_tree(best_tree, filled=True, feature_names=all_features, class_names=["Low", "High"], max_depth=2, fontsize=8)
+    plt.title('Decision Tree Visualization - Random Forest')
+    plt.show()
+
+if __name__ == "__main__":
+    filepath = 'taxi_trip_pricing_cleaned.csv'
+    df = load_data(filepath)
+    X, y, preprocessor, numerical_cols, categorical_cols = preprocess_data(df)
+    train_models(X, y, preprocessor, numerical_cols, categorical_cols)
